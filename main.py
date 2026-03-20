@@ -484,6 +484,7 @@ async def setup_bot_commands(bot: Bot):
         BotCommand(command="start", description="Bot ကို စတင်ရန်"),
         BotCommand(command="newseries", description="ဇာတ်ကား/Series အသစ် ဖန်တီးရန်"),
         BotCommand(command="addep", description="အပိုင်း (Episode) အသစ် ထပ်ထည့်ရန်"),
+        BotCommand(command="sortep", description="အပိုင်းများကို အထက်အောက် အလွယ်တကူရွှေ့ရန်"), # ယခုအသစ် ထပ်တိုးသည့်လိုင်း
         BotCommand(command="addvip", description="User ကို Lifetime VIP ပေးရန်"),
         BotCommand(command="addseries", description="ကားတစ်ကားချင်း ကြည့်ခွင့်ပေးရန်"),
         BotCommand(command="check", description="User ၏ အချက်အလက်ကို စစ်ဆေးရန်"),
