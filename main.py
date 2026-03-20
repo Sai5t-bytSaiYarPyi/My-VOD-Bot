@@ -291,6 +291,103 @@ async def set_episode_order(message: Message, command: CommandObject):
     else:
         await message.answer("❌ ရှာမတွေ့ပါ။ Series ID နှင့် Message ID မှန်ကန်မှုရှိမရှိ စစ်ဆေးပါ။")
 
+# ==========================================
+# 🌟 အလွယ်တကူ အထက်/အောက် ရွှေ့နိုင်မည့် Feature
+# ==========================================
+@dp.message(Command("sortep"))
+async def sort_episodes_menu(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    
+    if not command.args:
+        await message.answer("✍️ အသုံးပြုနည်း: `/sortep [series_id]`\n\nဥပမာ: `/sortep ninja_scroll`", parse_mode="HTML")
+        return
+
+    series_id = command.args.strip()
+    series_info = await series_col.find_one({"series_id": series_id})
+    
+    if not series_info or not series_info.get("episodes"):
+        await message.answer("⚠️ ဇာတ်ကားရှာမတွေ့ပါ (သို့) အပိုင်းများ မရှိသေးပါ။")
+        return
+
+    episodes = series_info["episodes"]
+
+    # လက်ရှိ အစီအစဉ်အတိုင်း အရင်စီမည်
+    def sort_logic(ep):
+        return (ep.get('order', 9999), [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', ep['name'])])
+    episodes.sort(key=sort_logic)
+
+    keyboard_buttons = []
+    for ep in episodes:
+        row = [
+            InlineKeyboardButton(text=f"{ep['name']}", callback_data="noop"),
+            InlineKeyboardButton(text="⬆️", callback_data=f"mv|u|{series_id}|{ep['msg_id']}"),
+            InlineKeyboardButton(text="⬇️", callback_data=f"mv|d|{series_id}|{ep['msg_id']}")
+        ]
+        keyboard_buttons.append(row)
+
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    await message.answer(f"↕️ <b>{series_info['title']}</b> ၏ အပိုင်းများကို အထက်/အောက် ရွှေ့ရန် ခလုတ်များကို နှိပ်ပါ။", reply_markup=reply_markup, parse_mode="HTML")
+
+# ခလုတ်အလွတ် (နာမည်) ကို နှိပ်မိပါက Loading မဖြစ်အောင် တားခြင်း
+@dp.callback_query(F.data == "noop")
+async def noop_handler(callback: CallbackQuery):
+    await callback.answer()
+
+# ⬆️ ⬇️ ခလုတ်များကို နှိပ်သောအခါ အလုပ်လုပ်မည့်စနစ်
+@dp.callback_query(F.data.startswith("mv|"))
+async def handle_move_episode(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    
+    parts = callback.data.split("|")
+    direction = parts[1]
+    series_id = parts[2]
+    msg_id = int(parts[3])
+
+    series_info = await series_col.find_one({"series_id": series_id})
+    if not series_info: 
+        return await callback.answer("⚠️ Error: Series မတွေ့ပါ။", show_alert=True)
+
+    episodes = series_info.get("episodes", [])
+    
+    def sort_logic(ep):
+        return (ep.get('order', 9999), [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', ep['name'])])
+    episodes.sort(key=sort_logic)
+
+    # ရွှေ့ချင်တဲ့ အပိုင်းရဲ့ လက်ရှိ Index ကို ရှာမည်
+    target_idx = next((i for i, ep in enumerate(episodes) if ep['msg_id'] == msg_id), None)
+    
+    if target_idx is None:
+        return await callback.answer("⚠️ အပိုင်းကို ရှာမတွေ့ပါ။", show_alert=True)
+
+    # အထက်/အောက် နေရာချိန်းမည်
+    if direction == "u" and target_idx > 0:
+        episodes[target_idx], episodes[target_idx - 1] = episodes[target_idx - 1], episodes[target_idx]
+    elif direction == "d" and target_idx < len(episodes) - 1:
+        episodes[target_idx], episodes[target_idx + 1] = episodes[target_idx + 1], episodes[target_idx]
+    else:
+        return await callback.answer("အစွန်းရောက်နေပါပြီ (ရွှေ့၍ မရတော့ပါ)", show_alert=False)
+
+    # အသစ်ဖြစ်သွားတဲ့ အစီအစဉ်အတိုင်း Database ထဲမှ order နံပါတ်တွေကို Auto ပြန်စီပေးမည်
+    for idx, ep in enumerate(episodes):
+        ep['order'] = idx + 1
+
+    # Database ထဲ Save မည်
+    await series_col.update_one({"series_id": series_id}, {"$set": {"episodes": episodes}})
+
+    # ခလုတ်အသစ်ပြန်ဆောက်ပြီး Message ကို ပြင်မည် (Edit လုပ်မည်)
+    keyboard_buttons = []
+    for ep in episodes:
+        row = [
+            InlineKeyboardButton(text=f"{ep['name']}", callback_data="noop"),
+            InlineKeyboardButton(text="⬆️", callback_data=f"mv|u|{series_id}|{ep['msg_id']}"),
+            InlineKeyboardButton(text="⬇️", callback_data=f"mv|d|{series_id}|{ep['msg_id']}")
+        ]
+        keyboard_buttons.append(row)
+
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    await callback.message.edit_reply_markup(reply_markup=reply_markup)
+    await callback.answer("✅ နေရာရွှေ့ပြီးပါပြီ")
+
     # ==========================================
 # 🌟 အလွယ်တကူ Auto-Add လုပ်မည့်စနစ် (Forward ပို့၍ ထည့်ခြင်း)
 # ==========================================
