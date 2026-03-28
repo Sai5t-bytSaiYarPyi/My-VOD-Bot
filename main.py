@@ -126,13 +126,18 @@ async def handle_watch_button(callback: CallbackQuery):
         await register_user(user_id)
         user_data = await get_user(user_id)
 
+# Database ထဲကနေ ဇာတ်ကား အချက်အလက်ကို ပြန်ခေါ်ပါမယ်
+    series_info = await series_col.find_one({"series_id": series_id})
+    is_free = series_info.get("is_free", False) if series_info else False
+
     has_access = False
     
-    if user_data.get("is_vip", False):
+    if is_free:  # အခမဲ့ဇာတ်ကားဖြစ်နေရင် တန်းကြည့်ခွင့်ပေးမယ်
+        has_access = True
+    elif user_data.get("is_vip", False):
         has_access = True
     elif series_id in user_data.get("purchased_series", []):
         has_access = True
-
     # Popup (show_alert) အစား ရိုးရိုး Message ပို့မည့်အပိုင်း
     if not has_access:
         alert_text = (
@@ -158,6 +163,8 @@ async def handle_watch_button(callback: CallbackQuery):
     except Exception as e:
         await bot.send_message(user_id, "⚠️ ဗီဒီယိုဖိုင် ရှာမတွေ့ပါ။ Admin ကို ဆက်သွယ်ပါ။")
         logging.error(f"Error copying message {msg_id}: {e}")
+
+
 
 # ==========================================
 # ၅။ Admin Commands (Content & User Management)
@@ -223,6 +230,24 @@ async def check_user(message: Message, command: CommandObject):
     is_vip = "✅ Yes" if user.get("is_vip") else "❌ No"
     purchased = ", ".join(user.get("purchased_series", [])) or "ဘာမှ မဝယ်ထားပါ"
     await message.answer(f"🔍 **ID:** `{target_id}`\n👑 **VIP:** {is_vip}\n🎬 **ဝယ်ထားသည်များ:** {purchased}", parse_mode="Markdown")
+    
+@dp.message(Command("newfree"))
+async def add_new_free_series(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    if not command.args:
+        await message.answer("✍️ အသုံးပြုနည်း: `/newfree [series_id] [ခေါင်းစဉ်]`\n\nဥပမာ: `/newfree patlabor Patlabor: The Early Days (1988) OVA`", parse_mode="Markdown")
+        return
+    args = command.args.split(maxsplit=1)
+    if len(args) < 2: return await message.answer("⚠️ ခေါင်းစဉ် ထည့်ရန် ကျန်နေပါသည်။")
+    series_id, title = args[0], args[1]
+    if await series_col.find_one({"series_id": series_id}):
+        return await message.answer("⚠️ ဤ ID ရှိပြီးသားပါ။")
+    
+    # is_free: True ဆိုပြီး Database ထဲမှာ မှတ်သားထားပါမယ်
+    await series_col.insert_one({"series_id": series_id, "title": title, "episodes": [], "is_free": True})
+    await message.answer(f"✅ အခမဲ့ဇာတ်ကား `/addep {series_id} [Message_ID] [အပိုင်းအမည်]` ဖြင့် အပိုင်းများ ထပ်ထည့်ပါ။", parse_mode="Markdown")
+
+
 
     # /editname [series_id] [msg_id] [နာမည်အသစ်]
 @dp.message(Command("editname"))
@@ -482,9 +507,10 @@ async def setup_bot_commands(bot: Bot):
     # (ခ) Admin သီးသန့် မြင်ရမည့် Command များ (သင့် Chat ထဲမှာပဲ ပေါ်ပါမည်)
     admin_commands = [
         BotCommand(command="start", description="Bot ကို စတင်ရန်"),
-        BotCommand(command="newseries", description="ဇာတ်ကား/Series အသစ် ဖန်တီးရန်"),
+        BotCommand(command="newseries", description="VIP ဇာတ်ကား/Series အသစ် ဖန်တီးရန်"),
+        BotCommand(command="newfree", description="အခမဲ့ (Free) ဇာတ်ကား အသစ် ဖန်တီးရန်"), # ယခုအသစ် ထပ်တိုးသည့်လိုင်း
         BotCommand(command="addep", description="အပိုင်း (Episode) အသစ် ထပ်ထည့်ရန်"),
-        BotCommand(command="sortep", description="အပိုင်းများကို အထက်အောက် အလွယ်တကူရွှေ့ရန်"), # ယခုအသစ် ထပ်တိုးသည့်လိုင်း
+        BotCommand(command="sortep", description="အပိုင်းများကို အထက်အောက် အလွယ်တကူရွှေ့ရန်"), 
         BotCommand(command="addvip", description="User ကို Lifetime VIP ပေးရန်"),
         BotCommand(command="addseries", description="ကားတစ်ကားချင်း ကြည့်ခွင့်ပေးရန်"),
         BotCommand(command="check", description="User ၏ အချက်အလက်ကို စစ်ဆေးရန်"),
