@@ -455,6 +455,79 @@ async def handle_forwarded_video(message: Message):
             parse_mode="HTML"
         )
 
+@dp.message(Command("allseries"))
+async def list_all_series(message: Message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    # Database ထဲက Series အားလုံးကို ဆွဲထုတ်မည် (အများဆုံး ၁၀၀ ခု)
+    series_list = await series_col.find({}).to_list(length=100)
+    
+    if not series_list:
+        return await message.answer("⚠️ Database တွင် စီးရီးများ မရှိသေးပါ။")
+
+    text = "🎬 <b>လက်ရှိ Bot ထဲရှိ စီးရီးများစာရင်း</b>\n\n"
+    for s in series_list:
+        s_id = s.get("series_id")
+        title = s.get("title")
+        is_free = "✅ Free" if s.get("is_free") else "💎 VIP"
+        ep_count = len(s.get("episodes", []))
+        
+        text += f"▪️ <b>ID:</b> <code>{s_id}</code>\n"
+        text += f"   <b>Title:</b> {title}\n"
+        text += f"   <b>Type:</b> {is_free} | <b>Episodes:</b> {ep_count} ပိုင်း\n\n"
+
+    # စာလုံးရေများလွန်းပါက Telegram ၏ limit ကိုကျော်သွားနိုင်သဖြင့် စစ်ဆေးခြင်း
+    if len(text) > 4000:
+        text = text[:4000] + "\n... (စာလုံးရေများနေသဖြင့် အချို့ကို ဖြတ်ထားပါသည်)"
+
+    await message.answer(text, parse_mode="HTML")
+
+@dp.message(Command("delseries"))
+async def delete_series(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    
+    if not command.args:
+        await message.answer("✍️ အသုံးပြုနည်း: <code>/delseries [series_id]</code>\n\nဥပမာ: <code>/delseries ninja_scroll</code>", parse_mode="HTML")
+        return
+
+    series_id = command.args.strip()
+    
+    # Database ထဲမှ ဖျက်ထုတ်ခြင်း
+    result = await series_col.delete_one({"series_id": series_id})
+    
+    if result.deleted_count > 0:
+        await message.answer(f"✅ Series ID <code>{series_id}</code> ကို အောင်မြင်စွာ ဖျက်လိုက်ပါပြီ။", parse_mode="HTML")
+    else:
+        await message.answer("❌ ရှာမတွေ့ပါ။ Series ID မှန်ကန်မှုရှိမရှိ စစ်ဆေးပါ။")
+
+@dp.message(Command("delep"))
+async def delete_episode(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID: return
+    
+    if not command.args:
+        await message.answer("✍️ အသုံးပြုနည်း: <code>/delep [series_id] [msg_id]</code>\n\nဥပမာ: <code>/delep ninja_scroll 105</code>", parse_mode="HTML")
+        return
+
+    args = command.args.split(maxsplit=1)
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("⚠️ အချက်အလက် မပြည့်စုံပါ (သို့) Message ID မှားယွင်းနေပါသည်။")
+        return
+
+    series_id, msg_id = args[0], int(args[1])
+
+    # သက်ဆိုင်ရာ Series ထဲက သတ်မှတ်ထားတဲ့ Message ID ရှိတဲ့အပိုင်းကို $pull သုံး၍ ဖယ်ရှားခြင်း
+    result = await series_col.update_one(
+        {"series_id": series_id},
+        {"$pull": {"episodes": {"msg_id": msg_id}}}
+    )
+
+    if result.modified_count > 0:
+        await message.answer(f"✅ Series <code>{series_id}</code> မှ အပိုင်း (Message ID: <b>{msg_id}</b>) ကို ဖျက်လိုက်ပါပြီ။", parse_mode="HTML")
+    else:
+        await message.answer("❌ ရှာမတွေ့ပါ။ Series ID နှင့် Message ID မှန်ကန်မှုရှိမရှိ စစ်ဆေးပါ။")
+
+
+
 # ခလုတ်နှိပ်လိုက်သောအခါ Database ထဲသို့ ထည့်သွင်းမည့် အပိုင်း
 @dp.callback_query(F.data.startswith("autoadd|"))
 async def process_autoadd(callback: CallbackQuery):
@@ -507,9 +580,12 @@ async def setup_bot_commands(bot: Bot):
     # (ခ) Admin သီးသန့် မြင်ရမည့် Command များ (သင့် Chat ထဲမှာပဲ ပေါ်ပါမည်)
     admin_commands = [
         BotCommand(command="start", description="Bot ကို စတင်ရန်"),
+        BotCommand(command="allseries", description="Bot ထဲရှိ စီးရီးများအားလုံးကို ကြည့်ရန်"), # အသစ်
         BotCommand(command="newseries", description="VIP ဇာတ်ကား/Series အသစ် ဖန်တီးရန်"),
-        BotCommand(command="newfree", description="အခမဲ့ (Free) ဇာတ်ကား အသစ် ဖန်တီးရန်"), # ယခုအသစ် ထပ်တိုးသည့်လိုင်း
+        BotCommand(command="newfree", description="အခမဲ့ (Free) ဇာတ်ကား အသစ် ဖန်တီးရန်"), 
         BotCommand(command="addep", description="အပိုင်း (Episode) အသစ် ထပ်ထည့်ရန်"),
+        BotCommand(command="delep", description="အပိုင်း (Episode) တစ်ခုကို ဖျက်ရန်"), # အသစ်
+        BotCommand(command="delseries", description="စီးရီးတစ်ခုလုံးကို ဖျက်ရန်"), # အသစ်
         BotCommand(command="sortep", description="အပိုင်းများကို အထက်အောက် အလွယ်တကူရွှေ့ရန်"), 
         BotCommand(command="addvip", description="User ကို Lifetime VIP ပေးရန်"),
         BotCommand(command="addseries", description="ကားတစ်ကားချင်း ကြည့်ခွင့်ပေးရန်"),
